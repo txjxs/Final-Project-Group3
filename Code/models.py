@@ -26,7 +26,6 @@ class Noisy_Encoder(nn.Module):
         x = self.layer3(x)
 
         return x
-
 class Noisy_Decoder(nn.Module):
     def __init__(self):
         super(Noisy_Decoder, self).__init__()
@@ -54,6 +53,11 @@ class Noisy_Decoder(nn.Module):
 
 
 class Denoising_Model(nn.Module):
+
+    @staticmethod
+    def name():
+        return 'Denoising_Model'
+
     def __init__(self):
         super(Denoising_Model, self).__init__()
         self.encoder = Noisy_Encoder()
@@ -66,6 +70,11 @@ class Denoising_Model(nn.Module):
 
 
 class UNet(nn.Module):
+
+    def name(self):
+        return 'UNet'
+
+
     def __init__(self):
         super(UNet, self).__init__()
 
