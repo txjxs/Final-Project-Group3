@@ -10,7 +10,7 @@ from models import UNet
 from utils import add_noise
 
 # --- Config ---
-MODEL_PATH = 'best_denoising_unet.pth'
+MODEL_PATH = 'UNet.pth'
 # IMG_SIZE = 128  <-- REMOVED! We don't force this anymore.
 
 # --- Page Setup ---
