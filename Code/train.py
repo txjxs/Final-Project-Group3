@@ -14,10 +14,10 @@ from utils import add_noise, seed_everything
 # --- Configuration ---
 SEED = 42
 DATA_PATH = '../data/imgs'
-BATCH_SIZE = 2048
+BATCH_SIZE = 500
 LEARNING_RATE = 0.001
 EPOCHS = 5
-NOISE_FACTOR = 0.4
+NOISE_FACTOR = 0.8
 NUM_WORKERS = multiprocessing.cpu_count()
 
 
@@ -28,7 +28,9 @@ def train():
 
     # 2. Prepare Data
     transform = transforms.Compose([
-        transforms.Resize((128, 128)),
+        transforms.Resize(320),  # Resize smallest side to 320 (keep aspect ratio)
+        transforms.RandomCrop(256),  # Cut a random 256x256 patch
+        transforms.RandomHorizontalFlip(),  # Extra free data augmentation
         transforms.ToTensor(),
     ])
 
