@@ -4,13 +4,16 @@ from torchvision import transforms
 from PIL import Image
 import numpy as np
 import io
+import os
+
 
 # --- Custom Modules ---
 from models import UNet
 from utils import add_noise
 
 # --- Config ---
-MODEL_PATH = 'UNet.pth'
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(SCRIPT_DIR, 'UNet.pth')
 # IMG_SIZE = 128  <-- REMOVED! We don't force this anymore.
 
 # --- Page Setup ---
