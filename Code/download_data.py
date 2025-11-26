@@ -1,61 +1,85 @@
 import os
 import requests
-import requests as r
-import tqdm as tqdm
-import zipfile as zf
+import zipfile
+from tqdm import tqdm
 
-URLS: dict[str, str] = {
-    'ut-zap50k-data.zip': 'https://vision.cs.utexas.edu/projects/finegrained/utzap50k/ut-zap50k-data.zip',
-    'ut-zap50k-feats.zip': 'https://vision.cs.utexas.edu/projects/finegrained/utzap50k/ut-zap50k-feats.zip',
-    'ut-zap50k-images.zip': 'https://vision.cs.utexas.edu/projects/finegrained/utzap50k/ut-zap50k-images.zip',
-    'ut-zap50k-lexi.zip': 'https://vision.cs.utexas.edu/projects/finegrained/utzap50k/ut-zap50k-lexi.zip',
-    'readme.txt': 'https://vision.cs.utexas.edu/projects/finegrained/utzap50k/readme.txt'}
-# %%
-PATH = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(os.path.dirname(PATH), 'data')
-print(DATA_DIR)
-if not os.path.exists(DATA_DIR):
-    os.makedirs(DATA_DIR)
-    print(DATA_DIR)
+DATA_DIR = "./coco_data"
+URLS = {
+    "val2017": "http://images.cocodataset.org/zips/val2017.zip",
+    "train2017": "http://images.cocodataset.org/zips/train2017.zip"
+}
 
+def download_file(url, dest_path):
+    """
+    Downloads a file from a URL with a progress bar.
+    """
+    if os.path.exists(dest_path):
+        print(f"File already exists: {dest_path}, skipping download.")
+        return
 
-# %%
-def download(URLS):
-    for filename, url in URLS.items():
-        file_path = os.path.join(DATA_DIR, filename)
-        print(f'Downloading {filename}... at {file_path}')
-        try:
-            response = requests.get(url, stream=True)
-            total_size_bytes = int(response.headers.get('content-length', 0))
-            print(f'size...{total_size_bytes / 1e+6}')
-            with open(file_path, 'wb') as f, tqdm.tqdm(
-                    desc=filename,
-                    total=total_size_bytes,
-                    unit='iB',
-                    unit_scale=True
-            ) as bar:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-                    bar.update(len(chunk))
-        except r.exceptions.RequestException as e:
-            print(f'Error downloading {url}: {e}')
-            continue
+    print(f" Downloading {url}...")
+    response = requests.get(url, stream=True)
+    total_size = int(response.headers.get('content-length', 0))
+    block_size = 1024 * 1024
 
-        if filename.endswith('.zip'):
-            print(f"Unzipping {filename}...")
-            try:
-                with zf.ZipFile(file_path, 'r') as zip_ref:
-                    zip_ref.extractall(DATA_DIR)
-                    print(f'Extracted {file_path} at {DATA_DIR}')
-            except zf.BadZipFile as e:
-                print(f'Error extracting {file_path}: {e}')
-                continue
-
-            print(f'Cleaning up {filename}...')
-            os.remove(file_path)
-        else:
-            print(f"Saved {filename}.")
+    with open(dest_path, 'wb') as file, tqdm(
+            desc=dest_path,
+            total=total_size,
+            unit='iB',
+            unit_scale=True,
+            unit_divisor=1024,
+    ) as bar:
+        for data in response.iter_content(block_size):
+            size = file.write(data)
+            bar.update(size)
+    print(f"Download complete: {dest_path}")
 
 
-download(URLS)
+def unzip_file(zip_path, extract_to):
+    """
+    Unzips a file to the specified directory.
+    """
+    print(f"Extracting {zip_path} to {extract_to}...")
+    try:
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(extract_to)
+        print(f"Extraction complete.")
+    except zipfile.BadZipFile:
+        print(f"Error: The file {zip_path} is corrupted. Please delete it and try downloading again.")
 
+
+def main():
+    # 1. Create Data Directory
+    if not os.path.exists(DATA_DIR):
+        os.makedirs(DATA_DIR)
+        print(f"Created directory: {DATA_DIR}")
+
+    # 2. Download and Extract Validation Set
+    val_zip_path = os.path.join(DATA_DIR, "val2017.zip")
+    download_file(URLS["val2017"], val_zip_path)
+
+    # Check if unzipped folder already exists to avoid re-unzipping
+    if not os.path.exists(os.path.join(DATA_DIR, "val2017")):
+        unzip_file(val_zip_path, DATA_DIR)
+
+        os.remove(val_zip_path)
+    else:
+        print(f"Validation data already extracted.")
+
+    # 3. Download and Extract Train Set (Huge, ~18GB)
+
+    train_zip_path = os.path.join(DATA_DIR, "train2017.zip")
+    download_file(URLS["train2017"], train_zip_path)
+
+    if not os.path.exists(os.path.join(DATA_DIR, "train2017")):
+        unzip_file(train_zip_path, DATA_DIR)
+
+        os.remove(train_zip_path)
+    else:
+        print(f"Training data already extracted.")
+
+    print("\nAll datasets are ready!")
+
+
+if __name__ == "__main__":
+    main()
