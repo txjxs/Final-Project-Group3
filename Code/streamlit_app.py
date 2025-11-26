@@ -8,7 +8,7 @@ import os
 
 
 # --- Custom Modules ---
-from models import UNet
+from models import UNet, LightweightUNet
 from utils import add_noise
 
 # --- Config ---
@@ -26,7 +26,8 @@ st.markdown("Upload an image to see the **U-Net** remove noise/grain in real-tim
 @st.cache_resource
 def load_model():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = UNet()
+    # model = UNet()
+    model = LightweightUNet()
     try:
         # Load weights (handle CPU/GPU automatically)
         checkpoint = torch.load(MODEL_PATH, map_location=device)
