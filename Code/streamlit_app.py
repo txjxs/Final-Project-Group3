@@ -13,7 +13,9 @@ from utils import add_noise
 
 # --- Config ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(SCRIPT_DIR, 'UNet.pth')
+# MODEL_PATH = os.path.join(SCRIPT_DIR, 'UNet.pth')
+MODEL_PATH = os.path.join(SCRIPT_DIR, 'LightweightUNet.pth')
+
 # IMG_SIZE = 128  <-- REMOVED! We don't force this anymore.
 
 # --- Page Setup ---
