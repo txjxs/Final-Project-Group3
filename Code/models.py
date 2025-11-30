@@ -1,154 +1,84 @@
 import torch
-from torch import nn
-
-
-class Noisy_Encoder(nn.Module):
-    def __init__(self):
-        super(Noisy_Encoder, self).__init__()
-        self.layer1 = nn.Sequential(
-            nn.Conv2d(3, 16, kernel_size=3, stride=2, padding=1),
-            nn.ReLU()
-        )
-        self.layer2 = nn.Sequential(
-            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU()
-        )
-        self.layer3 = nn.Sequential(
-            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(64),
-            nn.ReLU()
-        )
-
-    def forward(self, x):
-        x = self.layer1(x)
-        x = self.layer2(x)
-        x = self.layer3(x)
-
-        return x
-class Noisy_Decoder(nn.Module):
-    def __init__(self):
-        super(Noisy_Decoder, self).__init__()
-        self.layer1 = nn.Sequential(
-            nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU()
-        )
-        self.layer2 = nn.Sequential(
-            nn.ConvTranspose2d(32, 16, kernel_size=3, stride=2, padding=1, output_padding=1),
-            nn.BatchNorm2d(16),
-            nn.ReLU()
-
-        )
-        self.layer3 = nn.Sequential(
-            nn.ConvTranspose2d(16, 3, kernel_size=3, stride=2, padding=1,output_padding=1),
-            nn.Sigmoid()
-        )
-
-    def forward(self, x):
-        x = self.layer1(x)
-        x = self.layer2(x)
-        x = self.layer3(x)
-        return x
-
-
-class Denoising_Model(nn.Module):
-
-    @staticmethod
-    def name():
-        return 'Denoising_Model'
-
-    def __init__(self):
-        super(Denoising_Model, self).__init__()
-        self.encoder = Noisy_Encoder()
-        self.decoder = Noisy_Decoder()
-
-    def forward(self, x):
-        latent = self.encoder(x)
-        reconstruction = self.decoder(latent)
-        return reconstruction
+import torch.nn as nn
 
 
 class UNet(nn.Module):
-
-    def name(self):
-        return 'UNet'
-
-
     def __init__(self):
         super(UNet, self).__init__()
 
-        # --- ENCODER (Downsampling) ---
-        # 128 -> 64
-        self.enc1 = nn.Sequential(
-            nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU()
-        )
-        # 64 -> 32
-        self.enc2 = nn.Sequential(
-            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(64),
-            nn.ReLU()
-        )
-        # 32 -> 16 (Bottleneck)
-        self.enc3 = nn.Sequential(
-            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(128),
-            nn.ReLU()
-        )
+        def conv_block(in_c, out_c):
+            return nn.Sequential(
+                nn.Conv2d(in_c, out_c, kernel_size=3, padding=1),
+                nn.BatchNorm2d(out_c),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(out_c, out_c, kernel_size=3, padding=1),
+                nn.BatchNorm2d(out_c),
+                nn.ReLU(inplace=True)
+            )
 
-        # --- DECODER (Upsampling) ---
+        # Encoder
+        self.e1 = conv_block(1, 64)
+        self.e2 = conv_block(64, 128)
+        self.e3 = conv_block(128, 256)
+        self.e4 = conv_block(256, 512)
 
-        # Up 1: 16 -> 32
-        self.up1 = nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1)
-        self.up1_conv = nn.Sequential(
-            nn.Conv2d(128, 64, kernel_size=3, padding=1),  # 128 because we concat (64 from up1 + 64 from enc2)
-            nn.BatchNorm2d(64),
-            nn.ReLU()
-        )
+        self.pool = nn.MaxPool2d(2)
 
-        # Up 2: 32 -> 64
-        self.up2 = nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1)
-        self.up2_conv = nn.Sequential(
-            nn.Conv2d(64, 32, kernel_size=3, padding=1),  # 64 because we concat (32 from up2 + 32 from enc1)
-            nn.BatchNorm2d(32),
-            nn.ReLU()
-        )
+        # Bottleneck
+        self.b = conv_block(512, 1024)
 
-        # Up 3: 64 -> 128
-        self.up3 = nn.ConvTranspose2d(32, 16, kernel_size=3, stride=2, padding=1, output_padding=1)
-        self.final_conv = nn.Sequential(
-            nn.Conv2d(16, 3, kernel_size=3, padding=1),  # No concat here, just final polish
-            nn.Sigmoid()
-        )
+        # Decoder
+        self.up1 = nn.ConvTranspose2d(1024, 512, kernel_size=2, stride=2)
+        self.d1 = conv_block(1024, 512)
+
+        self.up2 = nn.ConvTranspose2d(512, 256, kernel_size=2, stride=2)
+        self.d2 = conv_block(512, 256)
+
+        self.up3 = nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2)
+        self.d3 = conv_block(256, 128)
+
+        self.up4 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
+        self.d4 = conv_block(128, 64)
+
+        # Output
+        self.out = nn.Conv2d(64, 2, kernel_size=1)  # Output 2 channels (ab)
+        self.tanh = nn.Tanh()  # Constrain output to [-1, 1]
 
     def forward(self, x):
-        # --- DOWN ---
-        e1 = self.enc1(x)  # Save this for skip connection! (Shape: 32 channels)
-        e2 = self.enc2(e1)  # Save this too! (Shape: 64 channels)
-        latent = self.enc3(e2)  # Bottleneck (Shape: 128 channels)
+        # Encoder
+        c1 = self.e1(x)
+        p1 = self.pool(c1)
 
-        # --- UP ---
+        c2 = self.e2(p1)
+        p2 = self.pool(c2)
 
-        # Un-squeeze bottleneck
-        d1 = self.up1(latent)
-        # SKIP CONNECTION 1: Glue d1 and e2 together
-        # d1 is 64 ch, e2 is 64 ch -> Result is 128 ch
-        d1 = torch.cat((d1, e2), dim=1)
-        d1 = self.up1_conv(d1)
+        c3 = self.e3(p2)
+        p3 = self.pool(c3)
 
-        d2 = self.up2(d1)
-        # SKIP CONNECTION 2: Glue d2 and e1 together
-        # d2 is 32 ch, e1 is 32 ch -> Result is 64 ch
-        d2 = torch.cat((d2, e1), dim=1)
-        d2 = self.up2_conv(d2)
+        c4 = self.e4(p3)
+        p4 = self.pool(c4)
 
-        output = self.up3(d2)
-        output = self.final_conv(output)
+        # Bottleneck
+        b = self.b(p4)
 
-        return output
+        # Decoder (with Skip Connections)
+        u1 = self.up1(b)
+        cat1 = torch.cat((u1, c4), dim=1)
+        dec1 = self.d1(cat1)
 
+        u2 = self.up2(dec1)
+        cat2 = torch.cat((u2, c3), dim=1)
+        dec2 = self.d2(cat2)
+
+        u3 = self.up3(dec2)
+        cat3 = torch.cat((u3, c2), dim=1)
+        dec3 = self.d3(cat3)
+
+        u4 = self.up4(dec3)
+        cat4 = torch.cat((u4, c1), dim=1)
+        dec4 = self.d4(cat4)
+
+        return self.tanh(self.out(dec4))
 
 
 
