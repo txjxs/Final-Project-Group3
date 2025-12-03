@@ -1,80 +1,115 @@
+import numpy as np
+from PIL import Image
+from skimage import color
 import torch
 import matplotlib.pyplot as plt
-import numpy as np
-import random
 import os
 
 
-def seed_everything(seed=42):
+def preprocess_image(pil_image, transform=None):
     """
-    Locks all random seeds for reproducibility.
+    The Master Decolorizer: Converts a PIL RGB image into L and ab tensors.
+    Used by both the Dataset (training) and the App (inference).
     """
-    random.seed(seed)
-    os.environ['PYTHONHASHSEED'] = str(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = True
-    print(f" Seed set to {seed}")
+    # 1. Apply PyTorch transforms (Resize, Flip, etc.)
+    if transform:
+        pil_image = transform(pil_image)
 
-def calculate_psnr(img1, img2):
+    # 2. Convert to Numpy
+    img_np = np.array(pil_image)
+
+    # 3. Convert RGB to Lab
+    # L range: [0, 100], a range: [-128, 127], b range: [-128, 127]
+    img_lab = color.rgb2lab(img_np).astype("float32")
+
+    # 4. Normalize to [-1, 1] range
+    img_lab[:, :, 0] = (img_lab[:, :, 0] / 50.0) - 1.0  # L channel
+    img_lab[:, :, 1:] = (img_lab[:, :, 1:] / 128.0)  # ab channels
+
+    # 5. Convert to Tensor (H, W, C) -> (C, H, W)
+    img_tensor = torch.from_numpy(img_lab.transpose((2, 0, 1)))
+
+    # 6. Split into Input (L) and Target (ab)
+    L = img_tensor[[0], ...]  # Shape: (1, 256, 256)
+    ab = img_tensor[[1, 2], ...]  # Shape: (2, 256, 256)
+
+    return L, ab
+
+
+def lab_to_rgb(L_tensor, ab_tensor):
     """
-    Calculates Peak Signal-to-Noise Ratio (PSNR).
-    img1, img2: Tensors [N, C, H, W] in range [0, 1]
+    Converts a batch of L and ab tensors back to RGB numpy images.
     """
-    mse = torch.mean((img1 - img2) ** 2)
-    if mse == 0:
-        return float('inf')
-    return 20 * torch.log10(1.0 / torch.sqrt(mse))
+    rgb_imgs = []
+
+    # Move to CPU and numpy
+    L = L_tensor.detach().cpu().numpy()
+    ab = ab_tensor.detach().cpu().numpy()
+
+    batch_size = L.shape[0]
+
+    for i in range(batch_size):
+        # 1. Denormalize
+        img_l = (L[i, 0, :, :] + 1.0) * 50.0
+        img_ab = ab[i, :, :, :] * 128.0
+
+        # 2. Stack L and ab channels
+        img_ab = img_ab.transpose((1, 2, 0))
+        lab_img = np.zeros((img_l.shape[0], img_l.shape[1], 3))
+        lab_img[:, :, 0] = img_l
+        lab_img[:, :, 1:] = img_ab
+
+        # 3. Convert Lab to RGB
+        rgb_img = color.lab2rgb(lab_img)
+        rgb_imgs.append(rgb_img)
+
+    return rgb_imgs
 
 
+def visualize_comparison(L_input, ab_input, ab_pred, save_path=None):
+    """
+    Displays: Grayscale Input | Ground Truth Color | Predicted Color
+    """
+    real_rgb_batch = lab_to_rgb(L_input, ab_input)
+    fake_rgb_batch = lab_to_rgb(L_input, ab_pred)
 
-def add_noise(img_tensor, noise_type='gaussian', factor=0.5):
-    noisy_img = img_tensor.clone() #helps keep the main immage in memory clean
-    if noise_type == 'gaussian':
-        noise = torch.randn_like(img_tensor) * factor
-        noisy_img += noise
+    # Visualize the first image in the batch
+    img_l = L_input[0, 0].detach().cpu().numpy()
+    img_real = real_rgb_batch[0]
+    img_fake = fake_rgb_batch[0]
 
-    elif noise_type == 'salt_pepper':
-        prob = torch.rand_like(img_tensor)
-        # Salt (White pixels) -> Set to 1.0
-        # If factor is 0.1, we want top 5% pixels to be white
-        noisy_img[prob < (factor / 2)] = 1.0
+    fig, ax = plt.subplots(1, 3, figsize=(15, 5))
 
-        # Pepper (Black pixels) -> Set to 0.0
-        # If factor is 0.1, we want bottom 5% pixels to be black
-        noisy_img[prob > 1 - (factor / 2)] = 0.0
+    # 1. The "Decolored" Version (Input)
+    ax[0].imshow(img_l, cmap='gray')
+    ax[0].set_title("Input (Grayscale)")
+    ax[0].axis("off")
 
+    # 2. The Ground Truth (Target)
+    ax[1].imshow(img_real)
+    ax[1].set_title("Ground Truth")
+    ax[1].axis("off")
+
+    # 3. The Model Output
+    ax[2].imshow(img_fake)
+    ax[2].set_title("Model Prediction")
+    ax[2].axis("off")
+
+    if save_path:
+        plt.savefig(save_path)
+        print(f"💾 Saved visualization to {save_path}")
     else:
-        raise ValueError(f"Unknown noise_type: {noise_type}. Use 'gaussian' or 'salt_pepper'.")
+        plt.show()
+    plt.close()
 
-    return torch.clamp(noisy_img, 0, 1)
 
-def plot_denoising_result(original, noisy, reconstructed=None , n=4):
-    original = original.detach().cpu()
-    noisy = noisy.detach().cpu()
+# --- WRAPPER FUNCTION FOR BACKWARD COMPATIBILITY ---
+def save_results(L, ab_input, ab_output, epoch, folder="results"):
+    """
+    Wrapper for visualize_comparison to match the signature expected by train.py
+    """
+    if not os.path.exists(folder):
+        os.makedirs(folder)
 
-    if reconstructed is not None:
-        reconstructed = reconstructed.detach().cpu()
-
-    plt.figure(figsize=(15,6))
-    for i in range(n):
-        ax = plt.subplot(3 if reconstructed is not None else 2, n, i+1)
-        plt.imshow(original[i].permute(1,2,0))
-        plt.title("Original")
-        plt.axis('off')
-
-        ax = plt.subplot(3 if reconstructed is not None else 2, n, i+1+n)
-        plt.imshow(noisy[i].permute(1,2,0))
-        plt.title("Noisy Input")
-        plt.axis("off")
-
-        if reconstructed is not None:
-            ax = plt.subplot(3, n, i + 1 + 2 * n)
-            plt.imshow(reconstructed[i].permute(1, 2, 0))
-            plt.title("Reconstructed")
-            plt.axis("off")
-    save_path = 'test.png'
-    plt.savefig(save_path)
-
+    path = f"{folder}/epoch_{epoch}.png"
+    visualize_comparison(L, ab_input, ab_output, save_path=path)

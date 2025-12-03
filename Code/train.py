@@ -1,123 +1,191 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, random_split
-from torchvision import transforms
+from torch.utils.data import DataLoader
+from tqdm import tqdm
 import os
-import multiprocessing
+from torchmetrics.image import StructuralSimilarityIndexMeasure
 
-# --- Import your modules ---
-from dataset import COCODataset
-from models import Denoising_Model, UNet
-from utils import add_noise, seed_everything
+from dataset import ColorizationDataset
+from models import UNet
+from utils import save_results
 
-# --- Configuration ---
-SEED = 42
-DATA_PATH = '../data/imgs'
-BATCH_SIZE = 500
-LEARNING_RATE = 0.001
-EPOCHS = 5
-NOISE_FACTOR = 0.8
-NUM_WORKERS = multiprocessing.cpu_count()
+LEARNING_RATE = 2e-4
+BATCH_SIZE = 32
+NUM_EPOCHS = 5
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+TRAIN_DIR = "./coco_data/train2017"
+VAL_DIR = "./coco_data/val2017"
+CHECKPOINT_DIR = "checkpoints"
 
 
-def train():
-    seed_everything(SEED)
-    # 1. Setup Device (Use GPU if available, otherwise CPU)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# --- METRIC UTILS ---
+class AverageMeter:
+    """Computes and stores the average and current value"""
 
-    # 2. Prepare Data
-    transform = transforms.Compose([
-        transforms.Resize(320),  # Resize smallest side to 320 (keep aspect ratio)
-        transforms.RandomCrop(256),  # Cut a random 256x256 patch
-        transforms.RandomHorizontalFlip(),  # Extra free data augmentation
-        transforms.ToTensor(),
-    ])
+    def __init__(self):
+        self.reset()
 
-    full_dataset = COCODataset(root_dir=DATA_PATH, transform=transform)
-    total_size = len(full_dataset)
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
 
-    train_size = int(0.8 * total_size)
-    val_size = int(0.1 * total_size)
-    test_size = total_size - train_size - val_size
-    print(f" Dataset Size: {total_size}")
-    print(f"   Split Config: Train={train_size}, Val={val_size}, Test={test_size}")
-    print(f"   Sum Check: {train_size + val_size + test_size} == {total_size}")
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
 
-    train_set, val_set, test_set = random_split(full_dataset, [train_size, val_size, test_size],
-                                                generator=torch.Generator().manual_seed(SEED))
 
-    print(f'Training set size: {len(train_set)}'
-          f'Validation set size: {len(val_set)}'
-          f'Test set size: {len(test_set)}')
+def calculate_psnr(output, target):
+    """
+    Calculate Peak Signal-to-Noise Ratio (PSNR) on a batch.
+    Assumes tensors are in range [-1, 1], so data_range = 2.0
+    """
+    mse = torch.mean((output - target) ** 2, dim=[1, 2, 3])  # Batch-wise MSE
+    mse = torch.clamp(mse, min=1e-10)
 
-    train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS, pin_memory=True,
-                            prefetch_factor=2,
-                            persistent_workers=True)
-    val_loader = DataLoader(val_set, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS, pin_memory=True, )
+    data_range = 2.0
+    psnr = 10 * torch.log10((data_range ** 2) / mse)
+    return torch.mean(psnr)
 
-    # 3. Initialize Model, Loss, and Optimizer
-    # model = Denoising_Model().to(device)
-    model = UNet().to(device)
-    criterion = nn.MSELoss()  # Mean Squared Error (Standard for images)
+
+# --- TRAINING FUNCTION ---
+def train_fn(loader, model, optimizer, loss_fn, scaler, ssim_metric):
+    model.train()
+    loop = tqdm(loader, leave=True)
+
+    # Trackers
+    loss_meter = AverageMeter()
+    psnr_meter = AverageMeter()
+    ssim_meter = AverageMeter()
+
+    for idx, (L, ab) in enumerate(loop):
+        L = L.to(DEVICE)
+        ab = ab.to(DEVICE)
+
+        # Train with Mixed Precision
+        with torch.amp.autocast('cuda'):
+            output = model(L)
+            loss = loss_fn(output, ab)
+
+        # Metrics
+        # Detach to avoid memory leaks during metric calculation
+        psnr = calculate_psnr(output.detach(), ab)
+        ssim = ssim_metric(output.detach(), ab)
+
+        # Update Trackers
+        loss_meter.update(loss.item(), L.size(0))
+        psnr_meter.update(psnr.item(), L.size(0))
+        ssim_meter.update(ssim.item(), L.size(0))
+
+        # Backprop
+        optimizer.zero_grad()
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
+
+        # Update Progress Bar
+        loop.set_postfix(loss=loss_meter.avg, psnr=f"{psnr_meter.avg:.2f}dB", ssim=f"{ssim_meter.avg:.3f}")
+
+    return loss_meter.avg, psnr_meter.avg, ssim_meter.avg
+
+
+# --- VALIDATION FUNCTION ---
+def validate_fn(loader, model, loss_fn, ssim_metric):
+    model.eval()
+    loss_meter = AverageMeter()
+    psnr_meter = AverageMeter()
+    ssim_meter = AverageMeter()
+
+    loop = tqdm(loader, desc="Validating", leave=False)
+
+    with torch.no_grad():
+        for L, ab in loop:
+            L = L.to(DEVICE)
+            ab = ab.to(DEVICE)
+
+            output = model(L)
+            loss = loss_fn(output, ab)
+            psnr = calculate_psnr(output, ab)
+            ssim = ssim_metric(output, ab)
+
+            loss_meter.update(loss.item(), L.size(0))
+            psnr_meter.update(psnr.item(), L.size(0))
+            ssim_meter.update(ssim.item(), L.size(0))
+
+    return loss_meter.avg, psnr_meter.avg, ssim_meter.avg
+
+
+# --- MAIN ---
+def main():
+    global TRAIN_DIR
+    if not os.path.exists(CHECKPOINT_DIR):
+        os.makedirs(CHECKPOINT_DIR)
+
+    print(f"Training on: {DEVICE}")
+
+    model = UNet().to(DEVICE)
+    loss_fn = nn.L1Loss()
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    scaler = torch.amp.GradScaler('cuda')
 
-    # 4. Training Loop
-    print("Starting Training Loop...")
-    total_batch = len(train_loader)
+    # Initialize SSIM Metric
+    # data_range is 2.0 because our tanh output is [-1, 1]
+    ssim_metric = StructuralSimilarityIndexMeasure(data_range=2.0).to(DEVICE)
 
-    best_val_loss = float("inf")
-    for epoch in range(EPOCHS):
-        ###TRAIN
-        model.train()  # Set model to training mode
-        train_loss = 0.0
-        for batch_idx, clean_images in enumerate(train_loader):
-            # A. Move data to device (GPU/CPU)
-            clean_images = clean_images.to(device)
-            # B. Create Noisy Input (The "Problem")
-            # We do this on the fly so the model sees different noise every time
-            noisy_images = add_noise(clean_images, noise_type='gaussian', factor=NOISE_FACTOR)
-            noisy_images = noisy_images.to(device)
-            # C. Zero Gradients
-            optimizer.zero_grad()
-            # D. Forward Pass (The Model guesses)
-            outputs = model(noisy_images)
-            # E. Compute Loss
-            # CRITICAL: Compare Output vs CLEAN images (not noisy ones)
-            loss = criterion(outputs, clean_images)
-            # F. Backward Pass (Calculate adjustments)
-            loss.backward()
-            # G. Optimize (Update weights)
-            optimizer.step()
-            train_loss += loss.item()
-            # Logging every 10 batches
-            if batch_idx % 5 == 0:
-                print(f"Epoch [{epoch + 1}/{EPOCHS}] Batch [{batch_idx}/{total_batch}] Loss: {loss.item():.4f}")
+    # Check Data
+    if not os.path.exists(TRAIN_DIR):
+        print(f"Error: {TRAIN_DIR} not found.")
+        # Fallback for testing if train doesn't exist
+        if os.path.exists(VAL_DIR):
+            print("Using Val dir as Train for testing purposes...")
+            TRAIN_DIR = VAL_DIR
+        else:
+            return
 
-        avg_train_loss = train_loss / len(train_loader)
+    # Loaders
+    train_ds = ColorizationDataset(root_dir=TRAIN_DIR, split='train')
+    val_ds = ColorizationDataset(root_dir=VAL_DIR, split='val')
 
+    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=True)
+    val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=2)
 
-        model.eval()
-        val_loss = 0.0
+    best_val_psnr = 0.0
+
+    for epoch in range(NUM_EPOCHS):
+        print(f"\nEpoch [{epoch + 1}/{NUM_EPOCHS}]")
+
+        # 1. Train
+        train_loss, train_psnr, train_ssim = train_fn(train_loader, model, optimizer, loss_fn, scaler, ssim_metric)
+
+        # 2. Validate
+        val_loss, val_psnr, val_ssim = validate_fn(val_loader, model, loss_fn, ssim_metric)
+
+        print(f"\tTrain: Loss {train_loss:.4f} | PSNR {train_psnr:.2f} | SSIM {train_ssim:.3f}")
+        print(f"\tVal:   Loss {val_loss:.4f} | PSNR {val_psnr:.2f} | SSIM {val_ssim:.3f}")
+
+        # 3. Save Best Model
+        if val_psnr > best_val_psnr:
+            best_val_psnr = val_psnr
+            torch.save(model.state_dict(), "best_model.pth")
+            print("\tNew Best Model Saved!")
+
+        # 4. Visualize
         with torch.no_grad():
-            for clean_images in val_loader:
-                clean_images = clean_images.to(device)
-                noisy_images = add_noise(clean_images, noise_type='gaussian', factor=NOISE_FACTOR).to(device)
-                outputs = model(noisy_images)
-                loss = criterion(outputs, clean_images)
-                val_loss += loss.item()
+            val_L, val_ab = next(iter(val_loader))
+            val_L = val_L.to(DEVICE)
+            val_ab = val_ab.to(DEVICE)
+            val_pred = model(val_L)
+            save_results(val_L, val_ab, val_pred, epoch, folder=CHECKPOINT_DIR)
 
-        avg_val_loss = val_loss / len(val_loader)
+        # 5. Checkpoint
+        if (epoch + 1) % 5 == 0:
+            torch.save(model.state_dict(), f"{CHECKPOINT_DIR}/epoch_{epoch + 1}.pth")
 
-        print(f"Epoch [{epoch + 1}/{EPOCHS}] Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
-
-        # End of Epoch Summary
-        if avg_val_loss < best_val_loss:
-            best_val_loss = avg_val_loss
-            torch.save(model.state_dict(), f"{model.name()}.pth")
-            print(f"Best model saved (Val Loss: {best_val_loss:.4f})")
-    print(" Training Complete!")
-
+    print("Training Complete!")
 
 if __name__ == "__main__":
-    train()
+    main()
