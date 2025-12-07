@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
-
+import torchvision.models as models
+import torch.nn.functional as F
 
 class UNet(nn.Module):
     def __init__(self):
@@ -80,5 +81,95 @@ class UNet(nn.Module):
 
         return self.tanh(self.out(dec4))
 
+
+class ResNetUNet(nn.Module):
+    """
+    ResNet-18 Encoder + U-Net Decoder.
+    Includes dimension safety checks to fix the runtime error.
+    """
+
+    def __init__(self, n_classes=2):
+        super().__init__()
+
+        # 1. Load Pre-trained ResNet18
+        base_model = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
+        self.base_layers = list(base_model.children())
+
+        # 2. Extract Encoder Layers
+        self.layer0 = nn.Sequential(*self.base_layers[:3])  # size=(N, 64, H/2, W/2)
+        self.layer1 = nn.Sequential(*self.base_layers[3:5])  # size=(N, 64, H/4, W/4)
+        self.layer2 = self.base_layers[5]  # size=(N, 128, H/8, W/8)
+        self.layer3 = self.base_layers[6]  # size=(N, 256, H/16, W/16)
+        self.layer4 = self.base_layers[7]  # size=(N, 512, H/32, W/32)
+
+        # 3. Decoder Layers
+        self.upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+
+        self.conv_up1 = self.conv_block(512 + 256, 256)
+        self.conv_up2 = self.conv_block(256 + 128, 128)
+        self.conv_up3 = self.conv_block(128 + 64, 64)
+        self.conv_up4 = self.conv_block(64 + 64, 64)
+
+        # 4. Final Output
+        self.final_upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        self.conv_last = nn.Conv2d(64, n_classes, 1)
+        self.tanh = nn.Tanh()
+
+    def conv_block(self, in_channels, out_channels):
+        return nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, 3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_channels, out_channels, 3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+
+    def forward(self, input):
+        # --- ENCODER ---
+        x = input.repeat(1, 3, 1, 1)  # Repeat 1-channel to 3-channel
+
+        layer0 = self.layer0(x)
+        layer1 = self.layer1(layer0)
+        layer2 = self.layer2(layer1)
+        layer3 = self.layer3(layer2)
+        layer4 = self.layer4(layer3)  # Bottleneck
+
+        # --- DECODER (With Safety Checks) ---
+
+        # Up 1
+        x = self.upsample(layer4)
+        # FIX: Force x to match layer3's size before concatenating
+        if x.shape != layer3.shape:
+            x = F.interpolate(x, size=layer3.shape[2:], mode='bilinear', align_corners=True)
+        x = torch.cat([x, layer3], dim=1)
+        x = self.conv_up1(x)
+
+        # Up 2
+        x = self.upsample(x)
+        if x.shape != layer2.shape:
+            x = F.interpolate(x, size=layer2.shape[2:], mode='bilinear', align_corners=True)
+        x = torch.cat([x, layer2], dim=1)
+        x = self.conv_up2(x)
+
+        # Up 3
+        x = self.upsample(x)
+        if x.shape != layer1.shape:
+            x = F.interpolate(x, size=layer1.shape[2:], mode='bilinear', align_corners=True)
+        x = torch.cat([x, layer1], dim=1)
+        x = self.conv_up3(x)
+
+        # Up 4
+        x = self.upsample(x)
+        if x.shape != layer0.shape:
+            x = F.interpolate(x, size=layer0.shape[2:], mode='bilinear', align_corners=True)
+        x = torch.cat([x, layer0], dim=1)
+        x = self.conv_up4(x)
+
+        # Final Up
+        x = self.final_upsample(x)
+
+        out = self.conv_last(x)
+        return self.tanh(out)
 
 
