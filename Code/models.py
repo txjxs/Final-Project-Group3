@@ -42,9 +42,8 @@ class UNet(nn.Module):
         self.d4 = conv_block(128, 64)
 
         # Output
-        self.out = nn.Conv2d(64, 2, kernel_size=1)  # Output 2 channels (ab)
-        self.tanh = nn.Tanh()  # Constrain output to [-1, 1]
-
+        self.out = nn.Conv2d(64, 2, kernel_size=1)
+        self.tanh = nn.Tanh()
     def forward(self, x):
         # Encoder
         c1 = self.e1(x)
