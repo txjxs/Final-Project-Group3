@@ -85,22 +85,21 @@ class UNet(nn.Module):
 class ResNetUNet(nn.Module):
     """
     ResNet-18 Encoder + U-Net Decoder.
-    Includes dimension safety checks to fix the runtime error.
     """
 
     def __init__(self, n_classes=2):
         super().__init__()
 
-        # 1. Load Pre-trained ResNet18
+        # 1. Pre-trained ResNet18
         base_model = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
         self.base_layers = list(base_model.children())
 
-        # 2. Extract Encoder Layers
-        self.layer0 = nn.Sequential(*self.base_layers[:3])  # size=(N, 64, H/2, W/2)
-        self.layer1 = nn.Sequential(*self.base_layers[3:5])  # size=(N, 64, H/4, W/4)
-        self.layer2 = self.base_layers[5]  # size=(N, 128, H/8, W/8)
-        self.layer3 = self.base_layers[6]  # size=(N, 256, H/16, W/16)
-        self.layer4 = self.base_layers[7]  # size=(N, 512, H/32, W/32)
+        # 2.Encoder Layers
+        self.layer0 = nn.Sequential(*self.base_layers[:3])
+        self.layer1 = nn.Sequential(*self.base_layers[3:5])
+        self.layer2 = self.base_layers[5]
+        self.layer3 = self.base_layers[6]
+        self.layer4 = self.base_layers[7]
 
         # 3. Decoder Layers
         self.upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
@@ -127,7 +126,7 @@ class ResNetUNet(nn.Module):
 
     def forward(self, input):
         # --- ENCODER ---
-        x = input.repeat(1, 3, 1, 1)  # Repeat 1-channel to 3-channel
+        x = input.repeat(1, 3, 1, 1)
 
         layer0 = self.layer0(x)
         layer1 = self.layer1(layer0)
@@ -135,38 +134,32 @@ class ResNetUNet(nn.Module):
         layer3 = self.layer3(layer2)
         layer4 = self.layer4(layer3)  # Bottleneck
 
-        # --- DECODER (With Safety Checks) ---
+        # --- DECODER ---
 
-        # Up 1
         x = self.upsample(layer4)
-        # FIX: Force x to match layer3's size before concatenating
         if x.shape != layer3.shape:
             x = F.interpolate(x, size=layer3.shape[2:], mode='bilinear', align_corners=True)
         x = torch.cat([x, layer3], dim=1)
         x = self.conv_up1(x)
 
-        # Up 2
         x = self.upsample(x)
         if x.shape != layer2.shape:
             x = F.interpolate(x, size=layer2.shape[2:], mode='bilinear', align_corners=True)
         x = torch.cat([x, layer2], dim=1)
         x = self.conv_up2(x)
 
-        # Up 3
         x = self.upsample(x)
         if x.shape != layer1.shape:
             x = F.interpolate(x, size=layer1.shape[2:], mode='bilinear', align_corners=True)
         x = torch.cat([x, layer1], dim=1)
         x = self.conv_up3(x)
 
-        # Up 4
         x = self.upsample(x)
         if x.shape != layer0.shape:
             x = F.interpolate(x, size=layer0.shape[2:], mode='bilinear', align_corners=True)
         x = torch.cat([x, layer0], dim=1)
         x = self.conv_up4(x)
 
-        # Final Up
         x = self.final_upsample(x)
 
         out = self.conv_last(x)
