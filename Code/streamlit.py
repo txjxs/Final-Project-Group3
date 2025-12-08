@@ -75,19 +75,21 @@ def load_task_model(task_name):
 
 
    try:
-       print(f"1. trying to load model {model_class}form {weight_path}")
-       checkpoint = torch.load(weight_path, map_location=device)
-       print(f"2. trying to load model {model_class}form {weight_path}") 
-
-
-       if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
-           print(f"3. trying to load model {model_class}form {weight_path}")
-           model.load_state_dict(checkpoint['state_dict'])
-       else:
-           print(f"4. trying to load model {model_class}form {weight_path}")
-           model.load_state_dict(checkpoint)
-           print(f"trying to load model {model_class}form {weight_path}")
-
+        print(f"1. Loading checkpoint from {weight_path}")
+        checkpoint = torch.load(weight_path, map_location=device)
+        
+        # Check for different common key names used to save weights
+        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+            print("2. Found 'model_state_dict' key.")
+            model.load_state_dict(checkpoint['model_state_dict'])
+            
+        elif isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+            print("2. Found 'state_dict' key.")
+            model.load_state_dict(checkpoint['state_dict'])
+            
+        else:
+            print("2. Assuming file is raw state_dict.")
+            model.load_state_dict(checkpoint)
 
        model.to(device)
        model.eval()
