@@ -30,8 +30,8 @@ class LABChromaticWeightedLoss(nn.Module):
         Returns:
             saturation: (B, 1, H, W) - [0, 1] range
         """
-        a = ab[:, 0:1] * 255.0 - 128.0  # [-128, 127]
-        b = ab[:, 1:2] * 255.0 - 128.0  # [-128, 127]
+        a = ab[:, 0:1] * 255.0 - 128.0
+        b = ab[:, 1:2] * 255.0 - 128.0
 
         saturation = torch.sqrt(a**2 + b**2)
 

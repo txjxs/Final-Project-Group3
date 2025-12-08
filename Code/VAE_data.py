@@ -80,7 +80,7 @@ class LABColorizeDataset(Dataset):
         }
 
 
-def lab_to_rgb_tensor(L, ab):
+def lab_to_rgb(L, ab):
     """
     Convert L*a*b* tensors back to RGB
 
@@ -92,10 +92,10 @@ def lab_to_rgb_tensor(L, ab):
         rgb: (B, 3, H, W) tensor [0, 1]
     """
     L_denorm = L * 100.0  # [0, 100]
-    a_denorm = ab[:, 0:1] * 255.0 - 128.0  # [-128, 127]
-    b_denorm = ab[:, 1:2] * 255.0 - 128.0  # [-128, 127]
+    a_denorm = ab[:, 0:1] * 255.0 - 128.0
+    b_denorm = ab[:, 1:2] * 255.0 - 128.0
 
-    lab = torch.cat([L_denorm, a_denorm, b_denorm], dim=1)  # (B, 3, H, W)
+    lab = torch.cat([L_denorm, a_denorm, b_denorm], dim=1)
 
     lab_np = lab.permute(0, 2, 3, 1).cpu().numpy()  # (B, H, W, 3)
 
@@ -106,7 +106,7 @@ def lab_to_rgb_tensor(L, ab):
         rgb_list.append(rgb)
 
     rgb_np = np.stack(rgb_list, axis=0)  # (B, H, W, 3)
-    rgb_tensor = torch.from_numpy(rgb_np).permute(0, 3, 1, 2).float()  # (B, 3, H, W)
+    rgb_tensor = torch.from_numpy(rgb_np).permute(0, 3, 1, 2).float()
 
     return rgb_tensor
 
@@ -201,7 +201,7 @@ if __name__ == "__main__":
 
         L_batch = L_clean.unsqueeze(0)
         ab_batch = ab_target.unsqueeze(0)
-        rgb = lab_to_rgb_tensor(L_batch, ab_batch)
+        rgb = lab_to_rgb(L_batch, ab_batch)
 
         rgb_img = rgb.squeeze(0).permute(1, 2, 0).numpy()
         axes[i, 3].imshow(rgb_img)
@@ -211,3 +211,4 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.savefig('lab_dataset_test.png', dpi=150)
     print("\nSaved lab_dataset_test.png")
+

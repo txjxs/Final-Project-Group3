@@ -4,7 +4,7 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-from VAE_data import LABColorizeDataset, lab_to_rgb_tensor
+from VAE_data import LABColorizeDataset, lab_to_rgb
 from VAE_model import CVAE
 from VAE_loss import LABCVAELoss
 
@@ -150,8 +150,8 @@ def visualize_results(model, dataloader, device, save_path, num_samples=4):
     with torch.no_grad():
         ab_pred, _, _ = model(L_noisy)
 
-    rgb_pred = lab_to_rgb_tensor(L_clean, ab_pred)
-    rgb_target = lab_to_rgb_tensor(L_clean, ab_target)
+    rgb_pred = lab_to_rgb(L_clean, ab_pred)
+    rgb_target = lab_to_rgb(L_clean, ab_target)
 
     L_noisy = L_noisy.cpu()
     rgb_pred = rgb_pred.cpu()
