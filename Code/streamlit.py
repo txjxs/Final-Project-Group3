@@ -31,8 +31,8 @@ TASK_CONFIG = {
        "file": "LightweightUNet.pth"
    },
    "Colorization": {
-       "class": LightweightUNet,
-       "file": "LightweightUNet.pth"
+       "class": ResNetUNet,
+       "file": "best_resnet_model.pth"
    },
    "Combined (VAE)": {
        "class": LightweightUNet,
@@ -55,8 +55,8 @@ def load_task_model(task_name):
        return None, f"No configuration found for {task_name}"
 
 
-   model_class = config["ResNetUNet"]
-   filename = config["models"]
+   model_class = config["class"]
+   filename = config["file"]
 
 
    try:
