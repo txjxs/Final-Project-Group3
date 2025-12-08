@@ -309,16 +309,24 @@ elif page_mode == "Combined (VAE)":
     uploaded_file = st.file_uploader("Upload Damaged Image", type=["jpg", "png", "jpeg"])
 
     if uploaded_file:
-        # 1. Load as RGB for display purposes
-        image_rgb = Image.open(uploaded_file).convert('RGB')
+        # 1. Load Original as RGB (for display and final output reference)
+        original_image = Image.open(uploaded_file).convert('RGB')
         
-        # 2. Create a Grayscale version for the Model Input
-        image_gray = image_rgb.convert('L')
-
-        # 3. Preprocess both (Gray for Model, RGB for Display)
-        # Note: preprocess_image handles resizing, so we do it for both to ensure they match size
-        input_tensor, _ = preprocess_image(image_gray, device)      # Input: (1, 1, H, W)
-        _, resized_img_rgb = preprocess_image(image_rgb, device)    # Display: RGB Image
+        # 2. PREPROCESS: Force Resize to 128x128 and Grayscale
+        # VAEs with Linear layers require exact training dimensions.
+        FIXED_SIZE = (128, 128)
+        
+        # Resize inputs
+        img_for_model = original_image.resize(FIXED_SIZE).convert('L') # Gray for model
+        img_for_display = original_image.resize(FIXED_SIZE).convert('RGB') # RGB for display
+        
+        # Convert to Tensor (No need for preprocess_image helper here, we do it manually to be safe)
+        transform_pipe = transforms.Compose([
+            transforms.ToTensor(), # Converts to [0, 1]
+        ])
+        
+        # Add batch dimension: (1, 1, 128, 128)
+        input_tensor = transform_pipe(img_for_model).unsqueeze(0).to(device)
 
         # AUTOMATIC INFERENCE
         with st.spinner("Restoring..."):
@@ -327,16 +335,14 @@ elif page_mode == "Combined (VAE)":
                 
                 # Handle tuple return (reconstruction, mu, logvar)
                 if isinstance(output, tuple) or isinstance(output, list):
-                    output_tensor = output[0]
+                    output_tensor = output[0] # The reconstruction is the first element
                 else:
                     output_tensor = output
 
+        # DISPLAY
         c1, c2 = st.columns(2)
         
-        # Display the RGB resized image (so user sees color input if they uploaded one)
-        c1.image(resized_img_rgb, caption="Original Input", use_container_width=True)
-        
-        # Display the restored output
+        c1.image(img_for_display, caption="Original Input (Resized to 128px)", use_container_width=True)
         c2.image(tensor_to_img(output_tensor), caption="Restored Output", use_container_width=True)
 
         st.download_button("Download Result", get_download_link(output_tensor, "vae_restored.png"), "vae_restored.png",
