@@ -290,3 +290,10 @@ wcwidth==0.2.14
 webcolors==25.10.0
 webencodings==0.5.1
 websocket-client==1.9.0
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
+streamlit>=1.20.0
+scikit-image>=0.19.0
+pillow>=9.0.0
+numpy>=1
