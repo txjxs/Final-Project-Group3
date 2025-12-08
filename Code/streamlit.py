@@ -91,9 +91,9 @@ def load_task_model(task_name):
             print("2. Assuming file is raw state_dict.")
             model.load_state_dict(checkpoint)
 
-       model.to(device)
-       model.eval()
-       return model, device
+        model.to(device)
+        model.eval()
+        return model, device
    except Exception as e:
        return None, f"Error loading weights: {str(e)}"
 
