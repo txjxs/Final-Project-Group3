@@ -11,7 +11,7 @@ def preprocess_image(pil_image, transform=None):
     The Master Decolorizer: Converts a PIL RGB image into L and ab tensors.
     Used by both the Dataset (training) and the App (inference).
     """
-    # 1. Apply PyTorch transforms (Resize, Flip, etc.)
+    # 1. Apply PyTorch transforms
     if transform:
         pil_image = transform(pil_image)
 
@@ -19,19 +19,18 @@ def preprocess_image(pil_image, transform=None):
     img_np = np.array(pil_image)
 
     # 3. Convert RGB to Lab
-    # L range: [0, 100], a range: [-128, 127], b range: [-128, 127]
     img_lab = color.rgb2lab(img_np).astype("float32")
 
     # 4. Normalize to [-1, 1] range
-    img_lab[:, :, 0] = (img_lab[:, :, 0] / 50.0) - 1.0  # L channel
-    img_lab[:, :, 1:] = (img_lab[:, :, 1:] / 128.0)  # ab channels
+    img_lab[:, :, 0] = (img_lab[:, :, 0] / 50.0) - 1.0  
+    img_lab[:, :, 1:] = (img_lab[:, :, 1:] / 128.0) 
 
-    # 5. Convert to Tensor (H, W, C) -> (C, H, W)
+    # 5. Convert to Tensor
     img_tensor = torch.from_numpy(img_lab.transpose((2, 0, 1)))
 
     # 6. Split into Input (L) and Target (ab)
-    L = img_tensor[[0], ...]  # Shape: (1, 256, 256)
-    ab = img_tensor[[1, 2], ...]  # Shape: (2, 256, 256)
+    L = img_tensor[[0], ...] 
+    ab = img_tensor[[1, 2], ...]  
 
     return L, ab
 
@@ -97,7 +96,7 @@ def visualize_comparison(L_input, ab_input, ab_pred, save_path=None):
 
     if save_path:
         plt.savefig(save_path)
-        print(f"💾 Saved visualization to {save_path}")
+        print(f" Saved visualization to {save_path}")
     else:
         plt.show()
     plt.close()
