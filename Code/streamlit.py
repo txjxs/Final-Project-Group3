@@ -12,7 +12,7 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 
 # --- IMPORT YOUR MODELS ---
-from models import LightweightUNet
+from models import ResNetUNet, #LightweightUNet
 from utils import add_noise
 
 
@@ -26,10 +26,10 @@ MODEL_DIR = os.path.join(SCRIPT_DIR, 'Models')
 # ⚙️ CONFIGURATION: MAP TASKS TO MODELS
 # ==========================================
 TASK_CONFIG = {
-   "Denoising": {
-       "class": LightweightUNet,
-       "file": "LightweightUNet.pth"
-   },
+   # "Denoising": {
+   #     "class": LightweightUNet,
+   #     "file": "LightweightUNet.pth"
+   # },
    "Colorization": {
        "class": ResNetUNet,
        "file": "best_resnet_model.pth"
