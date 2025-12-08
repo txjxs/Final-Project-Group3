@@ -61,6 +61,9 @@ def load_task_model(task_name):
 
 
    try:
+      if config == "Combined (VAE)":
+         model = model_class(1,2,128)
+      else:
        model = model_class()
    except Exception as e:
        return None, f"Error initializing class {model_class.__name__}: {e}"
