@@ -309,41 +309,50 @@ elif page_mode == "Combined (VAE)":
     uploaded_file = st.file_uploader("Upload Damaged Image", type=["jpg", "png", "jpeg"])
 
     if uploaded_file:
-        # 1. Load Original as RGB (for display and final output reference)
+        # 1. Load Original (Reference)
         original_image = Image.open(uploaded_file).convert('RGB')
         
-        # 2. PREPROCESS: Force Resize to 128x128 and Grayscale
-        # VAEs with Linear layers require exact training dimensions.
+        # 2. Preprocess: Resize to 128x128 and Convert to Grayscale
         FIXED_SIZE = (128, 128)
-        
-        # Resize inputs
-        img_for_model = original_image.resize(FIXED_SIZE).convert('L') # Gray for model
-        img_for_display = original_image.resize(FIXED_SIZE).convert('RGB') # RGB for display
-        
-        # Convert to Tensor (No need for preprocess_image helper here, we do it manually to be safe)
-        transform_pipe = transforms.Compose([
-            transforms.ToTensor(), # Converts to [0, 1]
-        ])
-        
-        # Add batch dimension: (1, 1, 128, 128)
-        input_tensor = transform_pipe(img_for_model).unsqueeze(0).to(device)
+        img_for_model = original_image.resize(FIXED_SIZE).convert('L')
+        img_for_display = original_image.resize(FIXED_SIZE).convert('RGB')
 
-        # AUTOMATIC INFERENCE
+        # 3. Prepare Tensor: Scale to [-1, 1] range
+        # Note: ToTensor() gives [0, 1]. We subtract 0.5 and divide by 0.5 to get [-1, 1].
+        img_array = np.array(img_for_model) / 255.0 
+        img_array = (img_array - 0.5) / 0.5
+        input_tensor = torch.from_numpy(img_array).float().unsqueeze(0).unsqueeze(0).to(device)
+
+        # 4. Display Columns
+        c1, c2 = st.columns(2)
+        c1.image(img_for_display, caption="Original Input (Resized)", use_container_width=True)
+
+        # 5. AUTOMATIC INFERENCE
         with st.spinner("Restoring..."):
             with torch.no_grad():
+                # --- PASTE START: Your snippet is integrated here ---
                 output = model(input_tensor)
+                ab_channels = output[0] if isinstance(output, tuple) else output
                 
-                # Handle tuple return (reconstruction, mu, logvar)
-                if isinstance(output, tuple) or isinstance(output, list):
-                    output_tensor = output[0] # The reconstruction is the first element
-                else:
-                    output_tensor = output
-
-        # DISPLAY
-        c1, c2 = st.columns(2)
-        
-        c1.image(img_for_display, caption="Original Input (Resized to 128px)", use_container_width=True)
-        c2.image(tensor_to_img(output_tensor), caption="Restored Output", use_container_width=True)
-
+                # Post-process: Concatenate Input L (grayscale) + Predicted AB
+                # Note: This assumes input_tensor was the 'L' channel scaled to [-1, 1]
+                L = input_tensor.cpu().detach()
+                ab = ab_channels.cpu().detach()
+                
+                # Concatenate to (1, 3, 128, 128)
+                lab_image = torch.cat([L, ab], dim=1)
+                
+                # Convert Tensor -> Numpy -> RGB for Streamlit
+                lab_np = lab_image[0].permute(1, 2, 0).numpy()
+                
+                # Un-normalize (Convert [-1, 1] back to Lab ranges)
+                lab_np[:,:,0] = (lab_np[:,:,0] + 1.0) * 50.0  # L: [0, 100]
+                lab_np[:,:,1:] = lab_np[:,:,1:] * 128.0       # ab: [-128, 128]
+                
+                # Convert Lab to RGB
+                rgb_image = color.lab2rgb(lab_np.astype("float64"))
+                
+                # Display Result
+                c2.image(rgb_image, caption="Restored Output", use_container_width=True)
         st.download_button("Download Result", get_download_link(output_tensor, "vae_restored.png"), "vae_restored.png",
                            "image/png")
