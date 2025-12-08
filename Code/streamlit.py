@@ -46,48 +46,78 @@ TASK_CONFIG = {
 
 # --- HELPER FUNCTIONS ---
 @st.cache_resource
+@st.cache_resource
 def load_task_model(task_name):
-   """Loads the specific model assigned to the selected task."""
-   device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    """Loads the specific model assigned to the selected task."""
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    config = TASK_CONFIG.get(task_name)
+    if not config:
+        return None, f"No configuration found for {task_name}"
 
-   config = TASK_CONFIG.get(task_name)
-   if not config:
-       return None, f"No configuration found for {task_name}"
+    model_class = config["class"]
+    filename = config["file"]
 
+    # --- 1. Initialize Model Architecture ---
+    try:
+        if task_name == "Combined (VAE)":
+            # Your VAE likely outputs 2 channels (ab) to be merged with L later.
+            # If your model was trained to output RGB directly, change '2' to '3'.
+            model = model_class(in_channels=1, out_channels=2, latent_dim=128)
+        else:
+            model = model_class()
+    except Exception as e:
+        return None, f"Error initializing class {model_class.__name__}: {e}"
 
-   model_class = config["class"]
-   filename = config["file"]
+    weight_path = os.path.join(MODEL_DIR, filename)
+    if not os.path.exists(weight_path):
+        return None, f"⚠️ Weights file missing! Expected: '{filename}' in Models folder."
 
+    # --- 2. Load Weights Safely ---
+    try:
+        print(f"Loading {task_name} from {weight_path}...")
+        checkpoint = torch.load(weight_path, map_location=device)
 
-   try:
-       model = model_class()
-   except Exception as e:
-       return None, f"Error initializing class {model_class.__name__}: {e}"
+        # Handle different saving conventions
+        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+            # THIS IS THE CASE FOR YOUR FILE (based on the error log)
+            model.load_state_dict(checkpoint['model_state_dict'])
+        elif isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['state_dict'])
+        else:
+            # Fallback: The file is the state_dict itself
+            model.load_state_dict(checkpoint)
 
+        model.to(device)
+        model.eval()
+        return model, device
 
-   weight_path = os.path.join(MODEL_DIR, filename)
-   if not os.path.exists(weight_path):
-       return None, f"⚠️ Weights file missing! Expected: '{filename}' in Models folder."
+    except Exception as e:
+        return None, f"Error loading weights: {str(e)}"
 
+def lab_to_rgb(L, ab):
+    """
+    Convert L*a*b* tensors back to RGB
+    """
+    # Ensure inputs are on CPU and detached
+    L = L.cpu().detach()
+    ab = ab.cpu().detach()
 
-   try:
-       checkpoint = torch.load(weight_path, map_location=device)
+    L_denorm = L * 100.0  # [0, 100]
+    a_denorm = ab[:, 0:1] * 255.0 - 128.0
+    b_denorm = ab[:, 1:2] * 255.0 - 128.0
 
+    lab = torch.cat([L_denorm, a_denorm, b_denorm], dim=1)
+    lab_np = lab.permute(0, 2, 3, 1).numpy()  # (B, H, W, 3)
 
-       if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
-           model.load_state_dict(checkpoint['state_dict'])
-       else:
-           model.load_state_dict(checkpoint)
+    rgb_list = []
+    for i in range(lab_np.shape[0]):
+        rgb = color.lab2rgb(lab_np[i])
+        rgb = np.clip(rgb, 0, 1)
+        rgb_list.append(rgb)
 
-
-       model.to(device)
-       model.eval()
-       return model, device
-   except Exception as e:
-       return None, f"Error loading weights: {str(e)}"
-
-
+    rgb_np = np.stack(rgb_list, axis=0)
+    return torch.from_numpy(rgb_np).permute(0, 3, 1, 2).float()
 
 
 def preprocess_image(image, device):
@@ -294,32 +324,75 @@ elif page_mode == "Colorization":
         #                    "image/png")
 # ==========================================
 elif page_mode == "Combined (VAE)":
-   st.title("Full Restoration (VAE)")
+    st.title("Full Restoration (VAE)")
 
+    # --- 1. SIDEBAR CONTROLS ---
+    # Slider removed. Just the mode selection.
+    vae_mode = st.sidebar.radio("Input Mode", ["Simulate Noise (Demo)", "Real Noisy Image"], key="vae_input_mode")
 
-   uploaded_file = st.file_uploader("Upload Damaged Image", type=["jpg", "png", "jpeg"])
+    uploaded_file = st.file_uploader("Upload Image", type=["jpg", "png", "jpeg"])
 
+    if uploaded_file:
+        # --- 2. PREPROCESSING (Exact Match to Training Code) ---
+        original_image = Image.open(uploaded_file).convert('RGB')
 
-   if uploaded_file:
-       image = Image.open(uploaded_file).convert('RGB')
-       input_tensor, resized_img = preprocess_image(image, device)
+        # Resize to 128x128
+        FIXED_SIZE = (128, 128)
+        image = original_image.resize(FIXED_SIZE)
 
+        # Convert to Numpy RGB [0, 1]
+        rgb_np = np.array(image).astype(np.float32) / 255.0
 
-       # AUTOMATIC INFERENCE
-       with st.spinner("Restoring..."):
-           with torch.no_grad():
-               output = model(input_tensor)
-               if isinstance(output, tuple) or isinstance(output, list):
-                   output_tensor = output[0]
-               else:
-                   output_tensor = output
+        # Convert to L*a*b* using skimage
+        lab_gt = color.rgb2lab(rgb_np)
 
+        # Extract L channel and Normalize to [0, 1]
+        L_gt = lab_gt[:, :, 0] / 100.0
 
-       c1, c2 = st.columns(2)
-       # Updated to use_container_width
-       c1.image(resized_img, caption="Original Input", use_container_width=True)
-       c2.image(tensor_to_img(output_tensor), caption="Restored Output", use_container_width=True)
+        # --- 3. NOISE INJECTION ---
+        if vae_mode == "Simulate Noise (Demo)":
+            # Add fixed Gaussian noise (0.1)
+            noise_factor = 0.1
+            noise = np.random.randn(*L_gt.shape) * noise_factor
+            L_noisy = np.clip(L_gt + noise, 0, 1)
 
+            # Use Noisy L for Model, Clean L for final Reconstruction
+            L_for_model = L_noisy
+            L_for_recon = L_gt
 
-       st.download_button("Download Result", get_download_link(output_tensor, "vae_restored.png"), "vae_restored.png",
-                          "image/png")
+            input_caption = "Model Input (Simulated Noise)"
+            L_display = (L_noisy * 255).astype(np.uint8)
+
+        else:
+            # Real Noisy Image: Use uploaded L channel directly
+            L_noisy = L_gt
+            L_for_model = L_noisy
+            L_for_recon = L_noisy
+
+            input_caption = "Model Input (Real Upload)"
+            L_display = (L_noisy * 255).astype(np.uint8)
+
+        # --- 4. PREPARE TENSORS ---
+        L_input_tensor = torch.from_numpy(L_for_model).unsqueeze(0).unsqueeze(0).float().to(device)
+        L_recon_tensor = torch.from_numpy(L_for_recon).unsqueeze(0).unsqueeze(0).float().to(device)
+
+        # --- 5. AUTOMATIC INFERENCE ---
+        with st.spinner("Restoring..."):
+            with torch.no_grad():
+                output = model(L_input_tensor)
+                pred_ab = output[0] if isinstance(output, tuple) else output
+
+                # Combine L + Predicted AB -> RGB
+                restored_tensor = lab_to_rgb(L_recon_tensor, pred_ab)
+                restored_img = tensor_to_img(restored_tensor)
+
+        # --- 6. DISPLAY RESULTS ---
+        c1, c2, c3 = st.columns(3)
+
+        c1.image(image, caption="1. Actual Uploaded Image", use_container_width=True)
+        c2.image(L_display, caption=f"2. {input_caption}", use_container_width=True)
+        c3.image(restored_img, caption="3. Restored Output", use_container_width=True)
+
+        st.download_button("Download Result", get_download_link(restored_tensor, "vae_restored.png"),
+                           "vae_restored.png",
+                           "image/png")
