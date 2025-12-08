@@ -5,16 +5,16 @@ The repository is organized into the following main folders:
 - `/Final-Group-Project-Report` - Contains the final PDF for our group report.
 - `/Final-Group-Presentation` - Contains the final PDF for our group presentation.
 - `/Code` - Contains all shared code for the group project, along with its own README.md explaining how to run it 
-- `/firstname-lastname-individual-project` - (To be added) Each member will add their own folder in this format.
+- `/firstname-lastname-individual-project` - Work of Individuals.
 
 ## Setup 
 1. Clone the repo 
 ```bash
-git clone https://github.com/txjxs/Final-Project-GroupX.git
+git clone https://github.com/txjxs/Final-Project-Group3.git
 ```
 2. Move into the repo 
 ```bash
-cd Final-Project-GroupX
+cd Final-Project-Group3
 ```
 3. Add Individual Folder
 ```bash
