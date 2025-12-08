@@ -328,26 +328,35 @@ elif page_mode == "Combined (VAE)":
         c1.image(img_for_display, caption="Original Input (Resized)", use_container_width=True)
 
         # 5. AUTOMATIC INFERENCE
+       # 5. AUTOMATIC INFERENCE
         with st.spinner("Restoring..."):
             with torch.no_grad():
-                # --- PASTE START: Your snippet is integrated here ---
                 output = model(input_tensor)
                 ab_channels = output[0] if isinstance(output, tuple) else output
                 
                 # Post-process: Concatenate Input L (grayscale) + Predicted AB
-                # Note: This assumes input_tensor was the 'L' channel scaled to [-1, 1]
                 L = input_tensor.cpu().detach()
                 ab = ab_channels.cpu().detach()
                 
+
+                # We shift it to [-0.5, 0.5] so it can be Green/Blue too.
+                if ab.min() >= 0 and ab.max() <= 1.0:
+                     ab = ab - 0.5
+                # --- FIX END ---
+
                 # Concatenate to (1, 3, 128, 128)
                 lab_image = torch.cat([L, ab], dim=1)
                 
                 # Convert Tensor -> Numpy -> RGB for Streamlit
                 lab_np = lab_image[0].permute(1, 2, 0).numpy()
                 
-                # Un-normalize (Convert [-1, 1] back to Lab ranges)
-                lab_np[:,:,0] = (lab_np[:,:,0] + 1.0) * 50.0  # L: [0, 100]
-                lab_np[:,:,1:] = lab_np[:,:,1:] * 128.0       # ab: [-128, 128]
+                # Un-normalize 
+                # L was scaled to [-1, 1], map back to [0, 100]
+                lab_np[:,:,0] = (lab_np[:,:,0] + 1.0) * 50.0  
+                
+                # ab was shifted to [-0.5, 0.5], map to [-128, 128]
+                # We multiply by 255 to cover the full spectrum
+                lab_np[:,:,1:] = lab_np[:,:,1:] * 255.0       
                 
                 # Convert Lab to RGB
                 rgb_image = color.lab2rgb(lab_np.astype("float64"))
