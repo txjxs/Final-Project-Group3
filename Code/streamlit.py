@@ -45,29 +45,6 @@ TASK_CONFIG = {
 
 
 # --- HELPER FUNCTIONS ---
-def lab_to_rgb(L, ab):
-    """
-    Convert L*a*b* tensors back to RGB
-    """
-    # Ensure inputs are on CPU and detached
-    L = L.cpu().detach()
-    ab = ab.cpu().detach()
-    
-    L_denorm = L * 100.0  # [0, 100]
-    a_denorm = ab[:, 0:1] * 255.0 - 128.0
-    b_denorm = ab[:, 1:2] * 255.0 - 128.0
-
-    lab = torch.cat([L_denorm, a_denorm, b_denorm], dim=1)
-    lab_np = lab.permute(0, 2, 3, 1).numpy()  # (B, H, W, 3)
-
-    rgb_list = []
-    for i in range(lab_np.shape[0]):
-        rgb = color.lab2rgb(lab_np[i])
-        rgb = np.clip(rgb, 0, 1)
-        rgb_list.append(rgb)
-
-    rgb_np = np.stack(rgb_list, axis=0)
-    return torch.from_numpy(rgb_np).permute(0, 3, 1, 2).float()
 @st.cache_resource
 def load_task_model(task_name):
    """Loads the specific model assigned to the selected task."""
@@ -84,9 +61,6 @@ def load_task_model(task_name):
 
 
    try:
-      if config == "Combined (VAE)":
-         model = model_class(1,2,128)
-      else:
        model = model_class()
    except Exception as e:
        return None, f"Error initializing class {model_class.__name__}: {e}"
@@ -98,25 +72,18 @@ def load_task_model(task_name):
 
 
    try:
-        print(f"1. Loading checkpoint from {weight_path}")
-        checkpoint = torch.load(weight_path, map_location=device)
-        
-        # Check for different common key names used to save weights
-        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-            print("2. Found 'model_state_dict' key.")
-            model.load_state_dict(checkpoint['model_state_dict'])
-            
-        elif isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
-            print("2. Found 'state_dict' key.")
-            model.load_state_dict(checkpoint['state_dict'])
-            
-        else:
-            print("2. Assuming file is raw state_dict.")
-            model.load_state_dict(checkpoint)
+       checkpoint = torch.load(weight_path, map_location=device)
 
-        model.to(device)
-        model.eval()
-        return model, device
+
+       if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+           model.load_state_dict(checkpoint['state_dict'])
+       else:
+           model.load_state_dict(checkpoint)
+
+
+       model.to(device)
+       model.eval()
+       return model, device
    except Exception as e:
        return None, f"Error loading weights: {str(e)}"
 
@@ -327,45 +294,32 @@ elif page_mode == "Colorization":
         #                    "image/png")
 # ==========================================
 elif page_mode == "Combined (VAE)":
-    st.title("Full Restoration (VAE)")
+   st.title("Full Restoration (VAE)")
 
-    uploaded_file = st.file_uploader("Upload Damaged Image", type=["jpg", "png", "jpeg"])
 
-    if uploaded_file:
-        # 1. Load Original
-        original_image = Image.open(uploaded_file).convert('RGB')
-        
-        # 2. Resize to 128x128 (Required by Model)
-        FIXED_SIZE = (128, 128)
-        img_resized_rgb = original_image.resize(FIXED_SIZE)
-        img_resized_gray = img_resized_rgb.convert('L') # Grayscale for input
+   uploaded_file = st.file_uploader("Upload Damaged Image", type=["jpg", "png", "jpeg"])
 
-        # 3. Create Input Tensor [0, 1]
-        # transforms.ToTensor() automatically scales [0, 255] -> [0.0, 1.0]
-        to_tensor = transforms.ToTensor()
-        input_L = to_tensor(img_resized_gray).unsqueeze(0).to(device) # (1, 1, 128, 128)
 
-        # 4. Display Original
-        c1, c2 = st.columns(2)
-        c1.image(img_resized_rgb, caption="Original Input (Resized)", use_container_width=True)
+   if uploaded_file:
+       image = Image.open(uploaded_file).convert('RGB')
+       input_tensor, resized_img = preprocess_image(image, device)
 
-        # 5. Inference
-        with st.spinner("Restoring..."):
-            with torch.no_grad():
-                output = model(input_L)
-                
-                # Extract 'ab' channels
-                pred_ab = output[0] if isinstance(output, tuple) else output
 
-                # 6. Use helper to merge L + ab -> RGB
-                # input_L is (1, 1, 128, 128) in range [0, 1]
-                # pred_ab is (1, 2, 128, 128) in range [0, 1]
-                restored_tensor = lab_to_rgb(input_L, pred_ab)
-                
-                # Convert back to Numpy for Streamlit display
-                restored_img = tensor_to_img(restored_tensor)
+       # AUTOMATIC INFERENCE
+       with st.spinner("Restoring..."):
+           with torch.no_grad():
+               output = model(input_tensor)
+               if isinstance(output, tuple) or isinstance(output, list):
+                   output_tensor = output[0]
+               else:
+                   output_tensor = output
 
-        c2.image(restored_img, caption="Restored Output", use_container_width=True)
 
-        st.download_button("Download Result", get_download_link(restored_tensor, "vae_restored.png"), "vae_restored.png",
-                           "image/png")
+       c1, c2 = st.columns(2)
+       # Updated to use_container_width
+       c1.image(resized_img, caption="Original Input", use_container_width=True)
+       c2.image(tensor_to_img(output_tensor), caption="Restored Output", use_container_width=True)
+
+
+       st.download_button("Download Result", get_download_link(output_tensor, "vae_restored.png"), "vae_restored.png",
+                          "image/png")
