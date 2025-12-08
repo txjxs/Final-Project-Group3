@@ -55,8 +55,8 @@ def load_task_model(task_name):
        return None, f"No configuration found for {task_name}"
 
 
-   model_class = config["class"]
-   filename = config["file"]
+   model_class = config["ResNetUNet"]
+   filename = config["models"]
 
 
    try:
