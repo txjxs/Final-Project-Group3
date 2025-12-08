@@ -119,7 +119,7 @@ class CVAE(nn.Module):
     Uses U-Net architecture with skip connections
     """
 
-    def __init__(self, in_channels=1, out_channels=3, latent_dim=128):
+    def __init__(self, in_channels=1, out_channels=2, latent_dim=128):
         super(CVAE, self).__init__()
 
         self.latent_dim = latent_dim
