@@ -6,7 +6,7 @@ import numpy as np
 import io
 import os
 import warnings
-from skimage import color
+from skimage import color, transform
 
 warnings.filterwarnings("ignore")
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
