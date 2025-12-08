@@ -45,6 +45,29 @@ TASK_CONFIG = {
 
 
 # --- HELPER FUNCTIONS ---
+def lab_to_rgb(L, ab):
+    """
+    Convert L*a*b* tensors back to RGB
+    """
+    # Ensure inputs are on CPU and detached
+    L = L.cpu().detach()
+    ab = ab.cpu().detach()
+    
+    L_denorm = L * 100.0  # [0, 100]
+    a_denorm = ab[:, 0:1] * 255.0 - 128.0
+    b_denorm = ab[:, 1:2] * 255.0 - 128.0
+
+    lab = torch.cat([L_denorm, a_denorm, b_denorm], dim=1)
+    lab_np = lab.permute(0, 2, 3, 1).numpy()  # (B, H, W, 3)
+
+    rgb_list = []
+    for i in range(lab_np.shape[0]):
+        rgb = color.lab2rgb(lab_np[i])
+        rgb = np.clip(rgb, 0, 1)
+        rgb_list.append(rgb)
+
+    rgb_np = np.stack(rgb_list, axis=0)
+    return torch.from_numpy(rgb_np).permute(0, 3, 1, 2).float()
 @st.cache_resource
 def load_task_model(task_name):
    """Loads the specific model assigned to the selected task."""
@@ -309,57 +332,40 @@ elif page_mode == "Combined (VAE)":
     uploaded_file = st.file_uploader("Upload Damaged Image", type=["jpg", "png", "jpeg"])
 
     if uploaded_file:
-        # 1. Load Original (Reference)
+        # 1. Load Original
         original_image = Image.open(uploaded_file).convert('RGB')
         
-        # 2. Preprocess: Resize to 128x128 and Convert to Grayscale
+        # 2. Resize to 128x128 (Required by Model)
         FIXED_SIZE = (128, 128)
-        img_for_model = original_image.resize(FIXED_SIZE).convert('L')
-        img_for_display = original_image.resize(FIXED_SIZE).convert('RGB')
+        img_resized_rgb = original_image.resize(FIXED_SIZE)
+        img_resized_gray = img_resized_rgb.convert('L') # Grayscale for input
 
-        # 3. Prepare Tensor: Scale to [-1, 1] range
-        # Note: ToTensor() gives [0, 1]. We subtract 0.5 and divide by 0.5 to get [-1, 1].
-        img_array = np.array(img_for_model) / 255.0 
-        img_array = (img_array - 0.5) / 0.5
-        input_tensor = torch.from_numpy(img_array).float().unsqueeze(0).unsqueeze(0).to(device)
+        # 3. Create Input Tensor [0, 1]
+        # transforms.ToTensor() automatically scales [0, 255] -> [0.0, 1.0]
+        to_tensor = transforms.ToTensor()
+        input_L = to_tensor(img_resized_gray).unsqueeze(0).to(device) # (1, 1, 128, 128)
 
-        # 4. Display Columns
+        # 4. Display Original
         c1, c2 = st.columns(2)
-        c1.image(img_for_display, caption="Original Input (Resized)", use_container_width=True)
+        c1.image(img_resized_rgb, caption="Original Input (Resized)", use_container_width=True)
 
-        # 5. AUTOMATIC INFERENCE
-       # 5. AUTOMATIC INFERENCE
+        # 5. Inference
         with st.spinner("Restoring..."):
             with torch.no_grad():
-                output = model(input_tensor)
-                ab_channels = output[0] if isinstance(output, tuple) else output
+                output = model(input_L)
                 
-                # Post-process: Concatenate Input L (grayscale) + Predicted AB
-                L = input_tensor.cpu().detach()
-                ab = ab_channels.cpu().detach()
-                
+                # Extract 'ab' channels
+                pred_ab = output[0] if isinstance(output, tuple) else output
 
-                # We shift it to [-0.5, 0.5] so it can be Green/Blue too.
-                if ab.min() >= 0 and ab.max() <= 1.0:
-                     ab = ab - 0.5
-                # --- FIX END ---
+                # 6. Use helper to merge L + ab -> RGB
+                # input_L is (1, 1, 128, 128) in range [0, 1]
+                # pred_ab is (1, 2, 128, 128) in range [0, 1]
+                restored_tensor = lab_to_rgb(input_L, pred_ab)
+                
+                # Convert back to Numpy for Streamlit display
+                restored_img = tensor_to_img(restored_tensor)
 
-                # Concatenate to (1, 3, 128, 128)
-                lab_image = torch.cat([L, ab], dim=1)
-                
-                # Convert Tensor -> Numpy -> RGB for Streamlit
-                lab_np = lab_image[0].permute(1, 2, 0).numpy()
-                
-                # Un-normalize 
-                # L was scaled to [-1, 1], map back to [0, 100]
-                lab_np[:,:,0] = (lab_np[:,:,0] + 1.0) * 50.0  
-                
-                # ab was shifted to [-0.5, 0.5], map to [-128, 128]
-                # We multiply by 255 to cover the full spectrum
-                lab_np[:,:,1:] = lab_np[:,:,1:] * 255.0       
-                
-                # Convert Lab to RGB
-                rgb_image = color.lab2rgb(lab_np.astype("float64"))
-                
-                # Display Result
-                c2.image(rgb_image, caption="Restored Output", use_container_width=True)
+        c2.image(restored_img, caption="Restored Output", use_container_width=True)
+
+        st.download_button("Download Result", get_download_link(restored_tensor, "vae_restored.png"), "vae_restored.png",
+                           "image/png")
