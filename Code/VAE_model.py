@@ -1,9 +1,3 @@
-"""
-Simple CVAE with U-Net architecture
-Input: Noisy grayscale (1 channel)
-Output: Clean RGB (3 channels)
-"""
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -190,28 +184,3 @@ class CVAE(nn.Module):
             samples = self.decoder(z, skip_connections)
 
         return samples
-
-
-def vae_loss(reconstruction, target, mu, logvar, beta=1.0):
-    """
-    VAE Loss = Reconstruction Loss + β * KL Divergence
-
-    Args:
-        reconstruction: Model output (B, 3, H, W)
-        target: Ground truth (B, 3, H, W)
-        mu: Latent mean (B, latent_dim)
-        logvar: Latent log variance (B, latent_dim)
-        beta: Weight for KL term
-
-    Returns:
-        total_loss, recon_loss, kl_loss
-    """
-    recon_loss = F.mse_loss(reconstruction, target, reduction='mean')
-
-    kl_per_sample = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1)
-    kl_loss = torch.mean(kl_per_sample)
-
-    # Total loss
-    total_loss = recon_loss + beta * kl_loss
-
-    return total_loss, recon_loss, kl_loss
