@@ -223,35 +223,75 @@ if page_mode == "Denoising":
 # PAGE 2: COLORIZATION
 # ==========================================
 elif page_mode == "Colorization":
-   st.title("Colorization Studio")
+    st.title("Colorization Studio")
+    
+    # Add Saturation Slider
+    saturation = st.sidebar.slider("🎨 Saturation Boost", 0.0, 3.0, 1.6, help="Fixes Sepia Effect")
 
+    uploaded_file = st.file_uploader("Upload B&W Image", type=["jpg", "png", "jpeg"])
 
-   uploaded_file = st.file_uploader("Upload B&W Image", type=["jpg", "png", "jpeg"])
+    if uploaded_file:
+        # 1. Load Original High-Res Image
+        image_pil = Image.open(uploaded_file).convert("RGB")
+        image_np = np.array(image_pil)
+        
+        # 2. Extract Original High-Res L Channel
+        # We perform the RGB->Lab conversion here to keep the full resolution L channel
+        orig_lab = color.rgb2lab(image_np)
+        orig_L = orig_lab[:, :, 0] # Range [0, 100]
+        orig_h, orig_w = orig_L.shape
+        
+        # 3. Prepare Low-Res Input for Model (256x256)
+        img_resized = image_pil.resize((256, 256))
+        img_resized_np = np.array(img_resized)
+        img_resized_lab = color.rgb2lab(img_resized_np).astype("float32")
+        
+        # Normalize L to [-1, 1]
+        img_l_input = (img_resized_lab[:, :, 0] / 50.0) - 1.0
+        tensor_input = torch.from_numpy(img_l_input).unsqueeze(0).unsqueeze(0).to(device)
 
+        # AUTOMATIC INFERENCE
+        with st.spinner("Colorizing..."):
+            with torch.no_grad():
+                # Model predicts low-res color (256x256)
+                ab_pred = model(tensor_input)
+                ab_pred = ab_pred.cpu().numpy()[0] # (2, 256, 256)
+                
+            # --- POST-PROCESSING (High-Res Fusion) ---
+            
+            # A. Resize predicted 'ab' to match Original Size
+            # transpose to (256, 256, 2) -> resize -> (H, W, 2)
+            ab_high_res = transform.resize(
+                ab_pred.transpose((1, 2, 0)), 
+                (orig_h, orig_w),
+                mode='reflect',
+                anti_aliasing=True
+            )
+            
+            # B. Apply Saturation Boost
+            ab_high_res = ab_high_res * 128.0 * saturation
+            
+            # C. Combine High-Res L with High-Res Color
+            lab_final = np.zeros((orig_h, orig_w, 3))
+            lab_final[:, :, 0] = orig_L       # Sharp L from original
+            lab_final[:, :, 1:] = ab_high_res # Blurry but vibrant color from AI
+            
+            # D. Convert to RGB
+            with np.errstate(invalid='ignore'):
+                final_rgb = color.lab2rgb(lab_final)
+                
+            # Convert to uint8 for display/download
+            final_img_uint8 = (final_rgb * 255).astype(np.uint8)
 
-   if uploaded_file:
-       image = Image.open(uploaded_file).convert('L').convert('RGB')
-       input_tensor, resized_img = preprocess_image_for_color(image, None)
+        # Display
+        c1, c2 = st.columns(2)
+        
+        # Show grayscale version so user knows what the AI sees
+        c1.image(image_pil.convert('L'), caption=f"Original Input ({orig_w}x{orig_h})", use_container_width=True)
+        c2.image(final_img_uint8, caption=f"Colorized Result (Sat: {saturation}x)", use_container_width=True)
 
-
-       # AUTOMATIC INFERENCE
-       with st.spinner("Colorizing..."):
-           with torch.no_grad():
-               output_tensor = model(input_tensor)
-
-
-       c1, c2 = st.columns(2)
-       # Updated to use_container_width
-       c1.image(resized_img, caption="B&W Input", use_container_width=True)
-       c2.image(tensor_to_img(output_tensor), caption="Colorized Result", use_container_width=True)
-
-
-       st.download_button("Download Result", get_download_link(output_tensor, "colorized.png"), "colorized.png",
-                          "image/png")
-
-
-# ==========================================
-# PAGE 3: COMBINED (VAE)
+        st.download_button("Download Result", get_download_link(final_img_uint8, "colorized.png"), "colorized.png",
+                           "image/png")
 # ==========================================
 elif page_mode == "Combined (VAE)":
    st.title("Full Restoration (VAE)")
