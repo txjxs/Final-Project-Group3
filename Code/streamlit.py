@@ -36,7 +36,7 @@ TASK_CONFIG = {
    },
    "Combined (VAE)": {
        "class": LightweightUNet,
-       "file": "LightweightUNet.pth"
+       "file": "best_model_VAE.pth"
    }
 }
 
