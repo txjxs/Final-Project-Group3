@@ -304,32 +304,40 @@ elif page_mode == "Colorization":
         #                    "image/png")
 # ==========================================
 elif page_mode == "Combined (VAE)":
-   st.title("Full Restoration (VAE)")
+    st.title("Full Restoration (VAE)")
 
+    uploaded_file = st.file_uploader("Upload Damaged Image", type=["jpg", "png", "jpeg"])
 
-   uploaded_file = st.file_uploader("Upload Damaged Image", type=["jpg", "png", "jpeg"])
+    if uploaded_file:
+        # 1. Load as RGB for display purposes
+        image_rgb = Image.open(uploaded_file).convert('RGB')
+        
+        # 2. Create a Grayscale version for the Model Input
+        image_gray = image_rgb.convert('L')
 
+        # 3. Preprocess both (Gray for Model, RGB for Display)
+        # Note: preprocess_image handles resizing, so we do it for both to ensure they match size
+        input_tensor, _ = preprocess_image(image_gray, device)      # Input: (1, 1, H, W)
+        _, resized_img_rgb = preprocess_image(image_rgb, device)    # Display: RGB Image
 
-   if uploaded_file:
-       image = Image.open(uploaded_file).convert('RGB')
-       input_tensor, resized_img = preprocess_image(image, device)
+        # AUTOMATIC INFERENCE
+        with st.spinner("Restoring..."):
+            with torch.no_grad():
+                output = model(input_tensor)
+                
+                # Handle tuple return (reconstruction, mu, logvar)
+                if isinstance(output, tuple) or isinstance(output, list):
+                    output_tensor = output[0]
+                else:
+                    output_tensor = output
 
+        c1, c2 = st.columns(2)
+        
+        # Display the RGB resized image (so user sees color input if they uploaded one)
+        c1.image(resized_img_rgb, caption="Original Input", use_container_width=True)
+        
+        # Display the restored output
+        c2.image(tensor_to_img(output_tensor), caption="Restored Output", use_container_width=True)
 
-       # AUTOMATIC INFERENCE
-       with st.spinner("Restoring..."):
-           with torch.no_grad():
-               output = model(input_tensor)
-               if isinstance(output, tuple) or isinstance(output, list):
-                   output_tensor = output[0]
-               else:
-                   output_tensor = output
-
-
-       c1, c2 = st.columns(2)
-       # Updated to use_container_width
-       c1.image(resized_img, caption="Original Input", use_container_width=True)
-       c2.image(tensor_to_img(output_tensor), caption="Restored Output", use_container_width=True)
-
-
-       st.download_button("Download Result", get_download_link(output_tensor, "vae_restored.png"), "vae_restored.png",
-                          "image/png")
+        st.download_button("Download Result", get_download_link(output_tensor, "vae_restored.png"), "vae_restored.png",
+                           "image/png")
