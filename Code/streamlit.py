@@ -12,7 +12,7 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 
 # --- IMPORT YOUR MODELS ---
-from models import ResNetUNet, CVA #LightweightUNet
+from models import ResNetUNet, CVAE #LightweightUNet
 from utils import add_noise
 
 
