@@ -290,8 +290,8 @@ elif page_mode == "Colorization":
         c1.image(image_pil.convert('L'), caption=f"Original Input ({orig_w}x{orig_h})", use_container_width=True)
         c2.image(final_img_uint8, caption=f"Colorized Result (Sat: {saturation}x)", use_container_width=True)
 
-        st.download_button("Download Result", get_download_link(final_img_uint8, "colorized.png"), "colorized.png",
-                           "image/png")
+        # st.download_button("Download Result", get_download_link(final_img_uint8, "colorized.png"), "colorized.png",
+        #                    "image/png")
 # ==========================================
 elif page_mode == "Combined (VAE)":
    st.title("Full Restoration (VAE)")
