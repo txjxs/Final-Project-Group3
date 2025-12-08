@@ -109,7 +109,33 @@ def tensor_to_img(t):
    return t.squeeze().cpu().detach().permute(1, 2, 0).numpy()
 
 
+def preprocess_image_for_color(pil_image, transform=None):
+    """
+    The Master Decolorizer: Converts a PIL RGB image into L and ab tensors.
+    Used by both the Dataset (training) and the App (inference).
+    """
+    # 1. Apply PyTorch transforms
+    if transform:
+        pil_image = transform(pil_image)
 
+    # 2. Convert to Numpy
+    img_np = np.array(pil_image)
+
+    # 3. Convert RGB to Lab
+    img_lab = color.rgb2lab(img_np).astype("float32")
+
+    # 4. Normalize to [-1, 1] range
+    img_lab[:, :, 0] = (img_lab[:, :, 0] / 50.0) - 1.0  
+    img_lab[:, :, 1:] = (img_lab[:, :, 1:] / 128.0) 
+
+    # 5. Convert to Tensor
+    img_tensor = torch.from_numpy(img_lab.transpose((2, 0, 1)))
+
+    # 6. Split into Input (L) and Target (ab)
+    L = img_tensor[[0], ...] 
+    ab = img_tensor[[1, 2], ...]  
+
+    return L, ab
 
 def get_download_link(img_tensor, filename):
    result_array = (tensor_to_img(img_tensor) * 255).astype(np.uint8)
@@ -204,7 +230,7 @@ elif page_mode == "Colorization":
 
    if uploaded_file:
        image = Image.open(uploaded_file).convert('L').convert('RGB')
-       input_tensor, resized_img = preprocess_image(image, device)
+       input_tensor, resized_img = preprocess_image_for_color(image, None)
 
 
        # AUTOMATIC INFERENCE
