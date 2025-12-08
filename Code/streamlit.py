@@ -35,7 +35,7 @@ TASK_CONFIG = {
        "file": "best_resnet_model.pth"
    },
    "Combined (VAE)": {
-       "class": LightweightUNet,
+       "class": CVAE,
        "file": "best_model_VAE.pth"
    }
 }
