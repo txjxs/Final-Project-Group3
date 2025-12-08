@@ -167,7 +167,7 @@ class DSConv(nn.Module):
             nn.ReLU(inplace=True),
 
             # --- Pointwise ---
-            # 1x1 conv mixes the channels together
+            # 1x1 conv mixes the channels
             nn.Conv2d(in_ch, out_ch, kernel_size=1, bias=False),
             nn.BatchNorm2d(out_ch),
             nn.ReLU(inplace=True)
@@ -262,3 +262,82 @@ class LightweightUNet(nn.Module):
     @staticmethod
     def name():
         return 'LightweightUNet'
+
+
+class DoubleConv(nn.Module):
+    """
+    Standard Heavy Double Convolution
+    """
+
+    def __init__(self, in_ch, out_ch):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_ch, out_ch, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True)
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+
+class HeavyUNet(nn.Module):
+    def __init__(self):
+        super(HeavyUNet, self).__init__()
+
+        # Exact same shape as LightweightUNet, but using Standard Convs
+        self.inc = DoubleConv(3, 32)
+
+        self.down1 = nn.Sequential(nn.MaxPool2d(2), DoubleConv(32, 64))
+        self.down2 = nn.Sequential(nn.MaxPool2d(2), DoubleConv(64, 128))
+        self.down3 = nn.Sequential(nn.MaxPool2d(2), DoubleConv(128, 256))
+        self.down4 = nn.Sequential(nn.MaxPool2d(2), DoubleConv(256, 512))
+
+        self.up1 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        self.up1_conv = DoubleConv(512 + 256, 256)
+
+        self.up2 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        self.up2_conv = DoubleConv(256 + 128, 128)
+
+        self.up3 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        self.up3_conv = DoubleConv(128 + 64, 64)
+
+        self.up4 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        self.up4_conv = DoubleConv(64 + 32, 32)
+
+        self.outc = nn.Sequential(
+            nn.Conv2d(32, 3, kernel_size=1),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        x1 = self.inc(x)
+        x2 = self.down1(x1)
+        x3 = self.down2(x2)
+        x4 = self.down3(x3)
+        x5 = self.down4(x4)
+
+        x = self.up1(x5)
+        x = torch.cat([x, x4], dim=1)
+        x = self.up1_conv(x)
+
+        x = self.up2(x)
+        x = torch.cat([x, x3], dim=1)
+        x = self.up2_conv(x)
+
+        x = self.up3(x)
+        x = torch.cat([x, x2], dim=1)
+        x = self.up3_conv(x)
+
+        x = self.up4(x)
+        x = torch.cat([x, x1], dim=1)
+        x = self.up4_conv(x)
+
+        return self.outc(x)
+
+    @staticmethod
+    def name():
+        return 'HeavyUNet'
