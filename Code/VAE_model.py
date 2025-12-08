@@ -43,11 +43,10 @@ class UNetEncoder(nn.Module):
         self.fc_logvar = nn.Linear(self.flatten_size, latent_dim)
 
     def forward(self, x):
-        # Encode with skip connections
-        e1 = self.enc1(x)  # (B, 64, 64, 64)
-        e2 = self.enc2(e1)  # (B, 128, 32, 32)
-        e3 = self.enc3(e2)  # (B, 256, 16, 16)
-        e4 = self.enc4(e3)  # (B, 512, 8, 8)
+        e1 = self.enc1(x) 
+        e2 = self.enc2(e1)  
+        e3 = self.enc3(e2)  
+        e4 = self.enc4(e3) 
 
         e4_flat = e4.view(e4.size(0), -1)
         mu = self.fc_mu(e4_flat)
@@ -90,7 +89,7 @@ class UNetDecoder(nn.Module):
 
         self.dec1 = nn.Sequential(
             nn.ConvTranspose2d(64 + 64, out_channels, kernel_size=4, stride=2, padding=1),
-            nn.Sigmoid()  # Output in [0, 1]
+            nn.Sigmoid() 
         )
 
     def forward(self, z, skip_connections):
@@ -134,7 +133,6 @@ class CVAE(nn.Module):
         """
         Reparameterization trick: z = mu + std * epsilon
         """
-        # Clamp for numerical stability
         logvar = torch.clamp(logvar, min=-10, max=10)
 
         std = torch.exp(0.5 * logvar)
@@ -155,25 +153,18 @@ class CVAE(nn.Module):
             mu: Latent mean (B, latent_dim)
             logvar: Latent log variance (B, latent_dim)
         """
-        # Encode
+
         mu, logvar, skip_connections = self.encoder(x)
 
-        # Sample latent
         z = self.reparameterize(mu, logvar)
 
-        # Decode
         reconstruction = self.decoder(z, skip_connections)
 
         return reconstruction, mu, logvar
 
     def sample(self, num_samples, device):
-        """
-        Generate samples from prior N(0, 1)
-        Note: No skip connections available when sampling
-        """
         z = torch.randn(num_samples, self.latent_dim).to(device)
 
-        # Create dummy skip connections
         with torch.no_grad():
             skip_connections = [
                 torch.zeros(num_samples, 64, 64, 64).to(device),
