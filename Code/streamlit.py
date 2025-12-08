@@ -76,7 +76,7 @@ def load_task_model(task_name):
 
    try:
        checkpoint = torch.load(weight_path, map_location=device)
-       print(f"trying to load model {model_class}form {weight_path}" 
+       print(f"trying to load model {model_class}form {weight_path}") 
 
 
        if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
