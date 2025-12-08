@@ -354,5 +354,3 @@ elif page_mode == "Combined (VAE)":
                 
                 # Display Result
                 c2.image(rgb_image, caption="Restored Output", use_container_width=True)
-        st.download_button("Download Result", get_download_link(output_tensor, "vae_restored.png"), "vae_restored.png",
-                           "image/png")
