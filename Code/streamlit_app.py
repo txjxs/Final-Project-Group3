@@ -195,19 +195,9 @@ elif page_mode == "Combined (VAE)":
         image = Image.open(uploaded_file).convert('RGB')
         input_tensor, resized_img = preprocess_image(image, device)
 
-        # AUTOMATIC INFERENCE
-        with st.spinner("Restoring..."):
-            with torch.no_grad():
-                output = model(input_tensor)
-                if isinstance(output, tuple) or isinstance(output, list):
-                    output_tensor = output[0]
-                else:
-                    output_tensor = output
-
-        c1, c2 = st.columns(2)
-        # Updated to use_container_width
-        c1.image(resized_img, caption="Original Input", use_container_width=True)
-        c2.image(tensor_to_img(output_tensor), caption="Restored Output", use_container_width=True)
-
-        st.download_button("Download Result", get_download_link(output_tensor, "vae_restored.png"), "vae_restored.png",
-                           "image/png")
+    st.download_button(
+        label="⬇️ Download Result",
+        data=byte_im,
+        file_name="restored_image.png",
+        mime="image/png"
+    )
